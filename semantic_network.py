@@ -17,6 +17,8 @@
 #     - Member      - uma relacao de pertenca de uma instancia a um tipo
 #
 
+from collections import Counter
+
 class Relation:
     def __init__(self, e1, rel, e2):
         self.entity1 = e1
@@ -42,12 +44,21 @@ class Association(Relation):
 
 # Subclasse Subtype
 
-
+class AssocOne(Association):
+    one = dict()
+    def __init__(self, e1, assoc, e2):
+        if assoc not in self.one:
+            self.one[assoc] = dict()
+        assert e2 not in self.one[assoc] or self.one[assoc][e2].entity1 == e1
+        Association.__init__(self, e1, assoc, e2)
+        self.one[assoc][e2] = self
+class AssocNum(Association):
+    def __init__(self, e1, assoc, e2):
+        assert isinstance(e2, (int, float))
+        Association.__init__(self, e1, assoc, e2)
 class Subtype(Relation):
     def __init__(self, sub, super):
         Relation.__init__(self, sub, "subtype", super)
-
-
 #   Exemplo:
 #   s = Subtype('homem','mamifero')
 
@@ -55,7 +66,6 @@ class Subtype(Relation):
 class Member(Relation):
     def __init__(self, obj, type):
         Relation.__init__(self, obj, "member", type)
-
 #   Exemplo:
 #   m = Member('socrates','homem')
 
@@ -210,4 +220,49 @@ class SemanticNetwork:
             local_assoc = self.query_local(e1=entity, rel=assoc)
         return decendents_assoc + local_assoc
     
+    def query_induce(self, entity, assoc):
+        descedents_assoc = self.query_down(entity, assoc)
+        assoc_values = [d.relation.entity2 for d in descedents_assoc]
+        for c, _ in Counter(assoc_values).most_common(1):
+            return c
+        
+    def query_local_assoc(self, entity, assoc):
+        local = self.query_local(e1=entity, rel=assoc, type=Association)
+        for d in local:
+            if isinstance(d.relation, AssocNum):
+                return sum([d.relation.entity2 for d in local]) / len(local)
+            if isinstance(d.relation, AssocOne):
+                for c, v in Counter([d.relation.entity2 for d in local]).most_common(1):
+                    return c, v / len(local)
+                return None
+            total_freq = 0
+            res = list()
+            for c, v in Counter([d.relation.entity2 for d in local]).most_common():
+                res.append((c, v / len(local)))
+                total_freq += v / len(local)
+                if total_freq > 0.75:
+                    return res
     
+    def query_assoc_value(self, E, A):
+        #first point
+        local = self.query_local(e1=E, rel=A, type=Association)
+        if len(local) and all([local[0].relation.entity2 == d.relation.entity2 for d in local]):
+            return local[0].relation.entity2
+        #second point
+        herdados = []
+        pds = self.query_local(e1=E, type=(Member, Subtype))
+        for ent2 in [d.relation.entity2 for d in pds]:
+            herdados.extend(self.query(ent2, A))
+            
+        def perc_v(assocs, v):
+            if len(assocs):
+                return [a.relation.entity2 for a in assocs].count(v)
+            return 0
+        
+        #third point
+        maximization = list()
+        for v in [a.relation.entity2 for a in local + herdados]:
+            maximization.append((v, (perc_v(herdados, v) + perc_v(herdados, v))/2))
+        v, _ = max(maximization, key=lambda x: x[1])
+        return v
+                
